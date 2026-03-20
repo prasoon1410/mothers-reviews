@@ -57,14 +57,21 @@ export default function App() {
   const loadGoogleReviews = async () => {
     setLoadingReviews(true);
     try {
-      const res = await fetch('/api/reviews');
+      // Try to get token from sessionStorage first
+      const token = sessionStorage.getItem('google_access_token');
+      const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+      const res = await fetch('/api/reviews', { headers, credentials: 'include' });
       const json = await res.json();
       if (json.reviews) {
         setReviews(json.reviews);
         setGoogleConnected(true);
         showNotification(`✅ Loaded ${json.reviews.length} real Google reviews!`);
+      } else {
+        console.error('Reviews error:', json);
+        showNotification('⚠️ ' + (json.error || 'Could not load reviews'), 'error');
       }
     } catch (e) {
+      console.error('Load error:', e);
       showNotification('⚠️ Could not load Google reviews', 'error');
     }
     setLoadingReviews(false);
