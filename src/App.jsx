@@ -5,7 +5,10 @@ const USERS = {
   viewer: { password: "viewer123",   role: "viewer" },
 };
 
-// Mock reviews for testing (will be replaced with real Google API data)
+const GOOGLE_CLIENT_ID = "77102317566-eg8r56fva0l9e6m27jcl4t1u7uecovlf.apps.googleusercontent.com";
+const GOOGLE_AUTH_URL = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=https://mothers-reviews.vercel.app/auth/callback&response_type=code&scope=https://www.googleapis.com/auth/business.manage&access_type=offline&prompt=consent`;
+
+// Mock reviews for testing (used when not connected to Google)
 const MOCK_REVIEWS = [
   { id: "1", author: "Ahmed Al Mansouri", rating: 5, text: "Absolutely amazing food! The biryani was the best I have had in Dubai. Service was fast and friendly. Will definitely come back!", date: "2026-03-15", replied: false, profilePhoto: null },
   { id: "2", author: "Priya Sharma", rating: 5, text: "Mother's Restaurant is a hidden gem! The dal makhani and butter naan were outstanding. Feels like home cooking. Highly recommend!", date: "2026-03-12", replied: false, profilePhoto: null },
@@ -27,6 +30,8 @@ export default function App() {
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState(false);
   const [reviews, setReviews] = useState(MOCK_REVIEWS);
+  const [googleConnected, setGoogleConnected] = useState(false);
+  const [loadingReviews, setLoadingReviews] = useState(false);
   const [filter, setFilter] = useState("all");
   const [selectedReview, setSelectedReview] = useState(null);
   const [draftReplies, setDraftReplies] = useState({});
@@ -38,6 +43,32 @@ export default function App() {
   const [notification, setNotification] = useState(null);
 
   const isAdmin = currentUser?.role === "admin";
+
+  // Check if returning from Google OAuth
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('auth') === 'success') {
+      setGoogleConnected(true);
+      window.history.replaceState({}, '', '/');
+      loadGoogleReviews();
+    }
+  }, []);
+
+  const loadGoogleReviews = async () => {
+    setLoadingReviews(true);
+    try {
+      const res = await fetch('/api/reviews');
+      const json = await res.json();
+      if (json.reviews) {
+        setReviews(json.reviews);
+        setGoogleConnected(true);
+        showNotification(`✅ Loaded ${json.reviews.length} real Google reviews!`);
+      }
+    } catch (e) {
+      showNotification('⚠️ Could not load Google reviews', 'error');
+    }
+    setLoadingReviews(false);
+  };
 
   const showNotification = (msg, type = "success") => {
     setNotification({ msg, type });
@@ -91,14 +122,24 @@ Guidelines:
 
   const postReply = async (review) => {
     setPostingId(review.id);
-    // TODO: Replace with real Google My Business API call
-    // await fetch('/api/post-reply', { method: 'POST', body: JSON.stringify({ reviewId: review.id, reply: draftReplies[review.id] }) })
-    await new Promise(r => setTimeout(r, 1500)); // Simulate API call
-    setReviews(prev => prev.map(r => r.id === review.id ? { ...r, replied: true, existingReply: draftReplies[review.id] } : r));
-    setPostedIds(prev => [...prev, review.id]);
+    try {
+      if (googleConnected && review.reviewName) {
+        // Post real reply to Google
+        const res = await fetch('/api/reviews', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reviewName: review.reviewName, reply: draftReplies[review.id] })
+        });
+        if (!res.ok) throw new Error('Failed to post');
+      }
+      setReviews(prev => prev.map(r => r.id === review.id ? { ...r, replied: true, existingReply: draftReplies[review.id] } : r));
+      setPostedIds(prev => [...prev, review.id]);
+      setSelectedReview(null);
+      showNotification(`✅ Reply posted for ${review.author}'s review!`);
+    } catch {
+      showNotification('⚠️ Failed to post reply to Google', 'error');
+    }
     setPostingId(null);
-    setSelectedReview(null);
-    showNotification(`✅ Reply posted for ${review.author}'s review!`);
   };
 
   // Stats
@@ -179,6 +220,20 @@ Guidelines:
           <span style={{ fontSize: "0.75rem", color: isAdmin ? "#4ade80" : "#a08020", background: isAdmin ? "#0a2a0a" : "#1a1a00", padding: "0.3rem 0.7rem", borderRadius: "5px", border: `1px solid ${isAdmin ? "#1a4a1a" : "#4a3800"}` }}>
             {isAdmin ? "👑 Admin" : "👁 Viewer"}
           </span>
+          {isAdmin && (
+            googleConnected
+              ? <span style={{ fontSize: "0.75rem", color: "#4ade80", background: "#0a2a0a", padding: "0.3rem 0.7rem", borderRadius: "5px", border: "1px solid #1a4a1a" }}>🟢 Google Connected</span>
+              : <button onClick={() => window.location.href = GOOGLE_AUTH_URL}
+                  style={{ background: "linear-gradient(135deg,#1a3a6a,#0a2a4a)", color: "#4a9eff", border: "1px solid #1a4a8a", borderRadius: "6px", padding: "0.4rem 0.8rem", fontSize: "0.78rem", cursor: "pointer", fontFamily: "inherit" }}>
+                  🔗 Connect Google Reviews
+                </button>
+          )}
+          {isAdmin && googleConnected && (
+            <button onClick={loadGoogleReviews} disabled={loadingReviews}
+              style={{ background: "#1a1200", color: "#f59e0b", border: "1px solid #4a3800", borderRadius: "6px", padding: "0.4rem 0.8rem", fontSize: "0.78rem", cursor: "pointer", fontFamily: "inherit" }}>
+              {loadingReviews ? "⏳" : "🔄"} Refresh
+            </button>
+          )}
           <button onClick={() => { setCurrentUser(null); setShowLogin(true); }}
             style={{ background: "#1a0e00", color: "#9a6a20", border: "1px solid #3a2200", borderRadius: "6px", padding: "0.4rem 0.8rem", fontSize: "0.8rem", cursor: "pointer", fontFamily: "inherit" }}>
             Logout
